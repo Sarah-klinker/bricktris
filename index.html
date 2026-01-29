@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bricktris (Brick Wall Tetris)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at top, #2c3e50 0, #000 55%);
+      color: #ecf0f1;
+      padding: 16px;
+    }
+
+    .wrap {
+      width: min(980px, 100%);
+      display: grid;
+      grid-template-columns: 1fr 260px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: rgba(0, 0, 0, 0.7);
+      border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+      padding: 16px;
+    }
+
+    .title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      font-size: 22px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .subtitle { font-size: 12px; opacity: 0.8; }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+      background: radial-gradient(circle at 15% 15%, #1f2d3a 0, #0f141a 60%, #070a0d 100%);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    }
+
+    .stats {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+    .pill {
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(255, 255, 255, 0.03);
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+    }
+    .pill b { letter-spacing: 0.08em; text-transform: uppercase; font-size: 11px; opacity: 0.8; }
+
+    .side h2 {
+      font-size: 12px;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      opacity: 0.85;
+      margin-bottom: 8px;
+    }
+    .btns { display: grid; gap: 10px; margin-top: 10px; }
+    button, a.btn {
+      width: 100%;
+      border-radius: 999px;
+      border: none;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      background: linear-gradient(135deg, #f1c40f, #e67e22);
+      color: #1b1205;
+      box-shadow: 0 10px 22px rgba(230, 126, 34, 0.35);
+      transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.12s ease;
+      text-decoration: none;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+    }
+    button:hover, a.btn:hover { transform: translateY(-1px); box-shadow: 0 12px 26px rgba(230, 126, 34, 0.45); }
+    button:active, a.btn:active { transform: translateY(0); box-shadow: 0 8px 18px rgba(230, 126, 34, 0.35); }
+
+    .ghost {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #ecf0f1;
+      box-shadow: none;
+      font-weight: 650;
+    }
+    .ghost:hover { box-shadow: none; background: rgba(255, 255, 255, 0.06); }
+
+    .help {
+      margin-top: 12px;
+      font-size: 12px;
+      opacity: 0.85;
+      line-height: 1.45;
+    }
+    .keys { margin-top: 8px; display: grid; gap: 6px; }
+    .keyrow { display: flex; justify-content: space-between; gap: 10px; }
+    .kbd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 860px) {
+      .wrap { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <div class="title">
+        <div>
+          <h1>Bricktris</h1>
+          <div class="subtitle">Tetris-style stacking with 3:1 bricks. Build a clean wall by clearing rows.</div>
+        </div>
+        <div class="subtitle" id="status">Press Start</div>
+      </div>
+
+      <canvas id="playfield" width="520" height="420"></canvas>
+
+      <div class="stats">
+        <div class="pill"><b>Score</b><span id="score">0</span></div>
+        <div class="pill"><b>Best</b><span id="best">0</span></div>
+        <div class="pill"><b>Lines</b><span id="lines">0</span></div>
+        <div class="pill"><b>Level</b><span id="level">1</span></div>
+      </div>
+    </div>
+
+    <div class="panel side">
+      <h2>Controls</h2>
+      <div class="help">
+        Build the wall by completing full rows.
+        <div class="keys">
+          <div class="keyrow"><span>Move</span><span class="kbd">←</span> <span class="kbd">→</span></div>
+          <div class="keyrow"><span>Soft drop</span><span class="kbd">↓</span></div>
+          <div class="keyrow"><span>Rotate</span><span class="kbd">↑</span></div>
+          <div class="keyrow"><span>Hard drop</span><span class="kbd">Space</span></div>
+          <div class="keyrow"><span>Pause</span><span class="kbd">P</span></div>
+        </div>
+      </div>
+
+      <div class="btns">
+        <button id="startBtn">Start / Restart</button>
+        <button id="pauseBtn" class="ghost">Pause / Resume</button>
+        <a class="btn ghost" href="index.html">Back to Snake</a>
+      </div>
+
+      <div class="help" style="margin-top:14px;">
+        <b>Background logo:</b> shown faintly behind the bricks.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Bricktris: classic tetromino logic, rendered as 3:1 bricks ---
+    const canvas = document.getElementById("playfield");
+    const ctx = canvas.getContext("2d");
+
+    // Brick ratio 3:1 (width : height)
+    const BRICK_H = 16;
+    const BRICK_W = 48;
+
+    // Playfield grid (classic 10x20)
+    const COLS = 10;
+    const ROWS = 20;
+    const HIDDEN_ROWS = 2; // spawn buffer
+    const GRID_ROWS = ROWS + HIDDEN_ROWS;
+
+    // Layout inside canvas
+    const PAD = 18;
+    const FIELD_W = COLS * BRICK_W;
+    const FIELD_H = ROWS * BRICK_H;
+    const FIELD_X = Math.floor((canvas.width - FIELD_W) / 2);
+    const FIELD_Y = Math.floor((canvas.height - FIELD_H) / 2);
+
+    // UI
+    const scoreEl = document.getElementById("score");
+    const bestEl = document.getElementById("best");
+    const linesEl = document.getElementById("lines");
+    const levelEl = document.getElementById("level");
+    const statusEl = document.getElementById("status");
+    const startBtn = document.getElementById("startBtn");
+    const pauseBtn = document.getElementById("pauseBtn");
+
+    let best = Number(localStorage.getItem("bricktris_best") || "0");
+    bestEl.textContent = best;
+
+    // Logo image (loaded from the repo's assets folder)
+    const logoImg = new Image();
+    logoImg.src = "assets/klinker_logo_white.png";
+    let logoReady = false;
+    logoImg.onload = () => { logoReady = true; };
+
+    // Load brick images
+    const BRICK_IMAGES = [];
+    const BRICK_IMAGE_COUNT = 4;
+    let bricksReady = 0;
+    for (let i = 1; i <= BRICK_IMAGE_COUNT; i++) {
+      const img = new Image();
+      img.src = `assets/formback_${i}.png`;
+      img.onload = () => {
+        bricksReady++;
+      };
+      BRICK_IMAGES.push(img);
+    }
+
+    // Tetromino definitions (matrices)
+    const PIECES = [
+      { name: "I", color: "#00bcd4", m: [[1,1,1,1]] },
+      { name: "O", color: "#f1c40f", m: [[1,1],[1,1]] },
+      { name: "T", color: "#9b59b6", m: [[0,1,0],[1,1,1]] },
+      { name: "S", color: "#2ecc71", m: [[0,1,1],[1,1,0]] },
+      { name: "Z", color: "#e74c3c", m: [[1,1,0],[0,1,1]] },
+      { name: "J", color: "#3498db", m: [[1,0,0],[1,1,1]] },
+      { name: "L", color: "#e67e22", m: [[0,0,1],[1,1,1]] },
+    ];
+
+    function createGrid() {
+      return Array.from({ length: GRID_ROWS }, () => Array(COLS).fill(null));
+    }
+
+    function cloneMatrix(m) {
+      return m.map(row => row.slice());
+    }
+
+    function rotateMatrixCW(m) {
+      // m: rows x cols
+      const h = m.length;
+      const w = m[0].length;
+      const out = Array.from({ length: w }, () => Array(h).fill(0));
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          out[x][h - 1 - y] = m[y][x];
+        }
+      }
+      return out;
+    }
+
+    function randPiece() {
+      const p = PIECES[Math.floor(Math.random() * PIECES.length)];
+      // Assign a random brick image index (0-3) to each piece
+      const brickIndex = Math.floor(Math.random() * BRICK_IMAGE_COUNT);
+      return {
+        name: p.name,
+        color: p.color, // Keep color for internal tracking
+        brickIndex: brickIndex, // Which brick image to use
+        m: cloneMatrix(p.m),
+        x: Math.floor((COLS - p.m[0].length) / 2),
+        y: 0, // hidden rows at top are part of grid indexing
+      };
+    }
+
+    function collides(grid, piece, dx = 0, dy = 0, testM = null) {
+      const m = testM || piece.m;
+      for (let y = 0; y < m.length; y++) {
+        for (let x = 0; x < m[y].length; x++) {
+          if (!m[y][x]) continue;
+          const gx = piece.x + x + dx;
+          const gy = piece.y + y + dy;
+          if (gx < 0 || gx >= COLS) return true;
+          if (gy >= GRID_ROWS) return true;
+          // Check if cell has a brick (not null/undefined) - brick indices are 0-3
+          if (gy >= 0 && grid[gy][gx] !== null && grid[gy][gx] !== undefined) return true;
+        }
+      }
+      return false;
+    }
+
+    function merge(grid, piece) {
+      for (let y = 0; y < piece.m.length; y++) {
+        for (let x = 0; x < piece.m[y].length; x++) {
+          if (!piece.m[y][x]) continue;
+          const gx = piece.x + x;
+          const gy = piece.y + y;
+          if (gy >= 0 && gy < GRID_ROWS) {
+            // Store brick index instead of color
+            // Use position-based variation for visual variety
+            const brickIndex = (piece.brickIndex + gx + gy) % BRICK_IMAGE_COUNT;
+            grid[gy][gx] = brickIndex;
+          }
+        }
+      }
+    }
+
+    function clearLines(grid) {
+      let cleared = 0;
+      for (let y = 0; y < GRID_ROWS; y++) {
+        // Check if row is full (all cells have a brick index, not null)
+        if (grid[y].every(cell => cell !== null && cell !== undefined)) {
+          grid.splice(y, 1);
+          grid.unshift(Array(COLS).fill(null));
+          cleared++;
+        }
+      }
+      return cleared;
+    }
+
+    function getDropMs(level) {
+      // Simple speed curve
+      return Math.max(80, 650 - (level - 1) * 55);
+    }
+
+    // Rendering helpers
+    function drawRoundedRect(x, y, w, h, r) {
+      const rr = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+    }
+
+    function drawBrick(px, py, brickIndex, alpha = 1) {
+      const x = px;
+      const y = py;
+      const w = BRICK_W;
+      const h = BRICK_H;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // Draw brick image if loaded, otherwise fallback to colored rectangle
+      if (bricksReady === BRICK_IMAGE_COUNT && BRICK_IMAGES[brickIndex] && BRICK_IMAGES[brickIndex].complete) {
+        ctx.drawImage(BRICK_IMAGES[brickIndex], x, y, w, h);
+      } else {
+        // Fallback: draw a simple colored rectangle while images load
+        ctx.fillStyle = "#8B7355"; // Default brick color
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = "rgba(0,0,0,0.3)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, w, h);
+      }
+
+      ctx.restore();
+    }
+
+    // Removed shade function - no longer needed since we're using images
+
+    function drawFrame() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Outer vignette
+      const v = ctx.createRadialGradient(canvas.width * 0.35, canvas.height * 0.25, 10, canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height));
+      v.addColorStop(0, "rgba(255,255,255,0.05)");
+      v.addColorStop(1, "rgba(0,0,0,0.55)");
+      ctx.fillStyle = v;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Field background
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      drawRoundedRect(FIELD_X - 10, FIELD_Y - 10, FIELD_W + 20, FIELD_H + 20, 14);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Logo in the background of the playing field
+      if (logoReady) {
+        ctx.save();
+        ctx.globalAlpha = 0.10;
+        ctx.filter = "grayscale(100%)";
+        // Fit logo nicely within field
+        const maxW = FIELD_W * 0.90;
+        const maxH = FIELD_H * 0.60;
+        const scale = Math.min(maxW / logoImg.width, maxH / logoImg.height);
+        const w = logoImg.width * scale;
+        const h = logoImg.height * scale;
+        const x = FIELD_X + (FIELD_W - w) / 2;
+        const y = FIELD_Y + (FIELD_H - h) / 2;
+        ctx.drawImage(logoImg, x, y, w, h);
+        ctx.restore();
+      }
+    }
+
+    function drawGrid(grid) {
+      // Subtle mortar grid
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = "rgba(255,255,255,0.10)";
+      for (let x = 0; x <= COLS; x++) {
+        ctx.fillRect(FIELD_X + x * BRICK_W, FIELD_Y, 1, FIELD_H);
+      }
+      for (let y = 0; y <= ROWS; y++) {
+        ctx.fillRect(FIELD_X, FIELD_Y + y * BRICK_H, FIELD_W, 1);
+      }
+      ctx.restore();
+
+      // Placed bricks (only visible rows)
+      for (let gy = HIDDEN_ROWS; gy < GRID_ROWS; gy++) {
+        for (let gx = 0; gx < COLS; gx++) {
+          const brickIndex = grid[gy][gx];
+          if (brickIndex === null || brickIndex === undefined) continue;
+          const px = FIELD_X + gx * BRICK_W;
+          const py = FIELD_Y + (gy - HIDDEN_ROWS) * BRICK_H;
+          drawBrick(px, py, brickIndex, 1);
+        }
+      }
+    }
+
+    function drawPiece(piece, alpha = 1) {
+      for (let y = 0; y < piece.m.length; y++) {
+        for (let x = 0; x < piece.m[y].length; x++) {
+          if (!piece.m[y][x]) continue;
+          const gx = piece.x + x;
+          const gy = piece.y + y;
+          if (gy < HIDDEN_ROWS) continue; // don't draw hidden
+          const px = FIELD_X + gx * BRICK_W;
+          const py = FIELD_Y + (gy - HIDDEN_ROWS) * BRICK_H;
+          // Use the piece's brick index, with slight variation for visual interest
+          const brickIndex = (piece.brickIndex + x + y) % BRICK_IMAGE_COUNT;
+          drawBrick(px, py, brickIndex, alpha);
+        }
+      }
+    }
+
+    function ghostDropY(grid, piece) {
+      let dy = 0;
+      while (!collides(grid, piece, 0, dy + 1)) dy++;
+      return dy;
+    }
+
+    // Game loop state
+    let grid = createGrid();
+    let current = null;
+    let next = null;
+    let running = false;
+    let paused = false;
+    let lastTime = 0;
+    let dropAccum = 0;
+    let dropMs = getDropMs(1);
+    let score = 0;
+    let lines = 0;
+    let level = 1;
+
+    function updateHUD() {
+      scoreEl.textContent = score;
+      linesEl.textContent = lines;
+      levelEl.textContent = level;
+      bestEl.textContent = best;
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function restart() {
+      grid = createGrid();
+      current = randPiece();
+      next = randPiece();
+      running = true;
+      paused = false;
+      lastTime = 0;
+      dropAccum = 0;
+      score = 0;
+      lines = 0;
+      level = 1;
+      dropMs = getDropMs(level);
+      updateHUD();
+      setStatus("Playing...");
+
+      // Immediate game-over check
+      if (collides(grid, current, 0, 0)) {
+        gameOver();
+        return;
+      }
+      requestAnimationFrame(tick);
+    }
+
+    function gameOver() {
+      running = false;
+      paused = false;
+      setStatus("Game Over – Start to retry");
+      if (score > best) {
+        best = score;
+        localStorage.setItem("bricktris_best", String(best));
+      }
+      updateHUD();
+      // Dim overlay
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      drawRoundedRect(FIELD_X - 10, FIELD_Y - 10, FIELD_W + 20, FIELD_H + 20, 14);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.font = "700 18px system-ui, -apple-system, Segoe UI, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("Game Over", FIELD_X + FIELD_W / 2, FIELD_Y + FIELD_H / 2 - 6);
+      ctx.font = "500 12px system-ui, -apple-system, Segoe UI, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      ctx.fillText("Press Start to build again", FIELD_X + FIELD_W / 2, FIELD_Y + FIELD_H / 2 + 16);
+      ctx.restore();
+    }
+
+    function lockPiece() {
+      merge(grid, current);
+      const cleared = clearLines(grid);
+      if (cleared > 0) {
+        // Classic-ish scoring
+        const base = [0, 100, 300, 500, 800][cleared] || (cleared * 250);
+        score += base * level;
+        lines += cleared;
+        const newLevel = 1 + Math.floor(lines / 10);
+        if (newLevel !== level) {
+          level = newLevel;
+          dropMs = getDropMs(level);
+        }
+        if (score > best) {
+          best = score;
+          localStorage.setItem("bricktris_best", String(best));
+        }
+        updateHUD();
+      }
+
+      current = next;
+      next = randPiece();
+
+      // Spawn in hidden area
+      current.x = Math.floor((COLS - current.m[0].length) / 2);
+      current.y = 0;
+
+      if (collides(grid, current, 0, 0)) {
+        draw(); // render final
+        gameOver();
+      }
+    }
+
+    function hardDrop() {
+      if (!running || paused) return;
+      const dy = ghostDropY(grid, current);
+      current.y += dy;
+      score += Math.max(0, dy) * 2; // reward hard drop
+      if (score > best) {
+        best = score;
+        localStorage.setItem("bricktris_best", String(best));
+      }
+      updateHUD();
+      lockPiece();
+    }
+
+    function tryRotate() {
+      if (!running || paused) return;
+      const rotated = rotateMatrixCW(current.m);
+      // simple wall kicks (try offsets)
+      const kicks = [0, -1, 1, -2, 2];
+      for (const k of kicks) {
+        if (!collides(grid, current, k, 0, rotated)) {
+          current.m = rotated;
+          current.x += k;
+          return;
+        }
+      }
+    }
+
+    function draw() {
+      drawFrame();
+      drawGrid(grid);
+
+      // Ghost piece
+      if (running) {
+        const dy = ghostDropY(grid, current);
+        const ghost = { ...current, y: current.y + dy };
+        drawPiece(ghost, 0.20);
+      }
+
+      // Current piece
+      if (running) drawPiece(current, 1);
+
+      // Field edge accents
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.strokeStyle = "rgba(255,255,255,0.25)";
+      ctx.lineWidth = 1;
+      drawRoundedRect(FIELD_X - 10, FIELD_Y - 10, FIELD_W + 20, FIELD_H + 20, 14);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function tick(t) {
+      if (!running) return;
+      if (paused) {
+        draw();
+        requestAnimationFrame(tick);
+        return;
+      }
+
+      if (!lastTime) lastTime = t;
+      const dt = t - lastTime;
+      lastTime = t;
+      dropAccum += dt;
+
+      if (dropAccum >= dropMs) {
+        dropAccum = 0;
+        if (!collides(grid, current, 0, 1)) {
+          current.y += 1;
+        } else {
+          lockPiece();
+        }
+      }
+
+      draw();
+      requestAnimationFrame(tick);
+    }
+
+    function togglePause() {
+      if (!running) return;
+      paused = !paused;
+      setStatus(paused ? "Paused" : "Playing...");
+    }
+
+    // Controls
+    window.addEventListener("keydown", (e) => {
+      const k = e.key;
+      if (k === "p" || k === "P") {
+        togglePause();
+        return;
+      }
+      if (!running || paused) return;
+
+      if (k === "ArrowLeft") {
+        if (!collides(grid, current, -1, 0)) current.x -= 1;
+      } else if (k === "ArrowRight") {
+        if (!collides(grid, current, 1, 0)) current.x += 1;
+      } else if (k === "ArrowDown") {
+        if (!collides(grid, current, 0, 1)) {
+          current.y += 1;
+          score += 1; // soft drop reward
+          if (score > best) {
+            best = score;
+            localStorage.setItem("bricktris_best", String(best));
+          }
+          updateHUD();
+        }
+      } else if (k === "ArrowUp") {
+        tryRotate();
+      } else if (k === " ") {
+        e.preventDefault();
+        hardDrop();
+      }
+    });
+
+    startBtn.addEventListener("click", restart);
+    pauseBtn.addEventListener("click", togglePause);
+
+    // Initial paint
+    updateHUD();
+    draw();
+  </script>
+</body>
+</html>
+
