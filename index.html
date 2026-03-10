@@ -232,6 +232,12 @@
       BRICK_IMAGES.push(img);
     }
 
+    // --- Audio (provide your own files in /assets) ---
+    const lineClearSound = new Audio("assets/line_clear.wav"); // short, fun "pop" / "whoosh"
+    lineClearSound.volume = 0.7;
+    const gameOverSound = new Audio("assets/game_over.wav"); // dramatic "boom"/"gong"
+    gameOverSound.volume = 0.8;
+
     // Tetromino definitions (matrices)
     const PIECES = [
       { name: "I", color: "#00bcd4", m: [[1,1,1,1]] },
@@ -311,16 +317,71 @@
     }
 
     function clearLines(grid) {
-      let cleared = 0;
+      const clearedRows = [];
       for (let y = 0; y < GRID_ROWS; y++) {
         // Check if row is full (all cells have a brick index, not null)
         if (grid[y].every(cell => cell !== null && cell !== undefined)) {
           grid.splice(y, 1);
           grid.unshift(Array(COLS).fill(null));
-          cleared++;
+          clearedRows.push(y);
         }
       }
-      return cleared;
+      return clearedRows;
+    }
+
+    // --- Line clear + particle + screen shake effects ---
+    const lineFlashRows = []; // { row: visibleRowIndex, time: remainingMs, maxTime }
+    const particles = []; // { x, y, vx, vy, life, maxLife }
+    let shakeTime = 0;
+    let shakeDuration = 0;
+    let shakeIntensity = 0;
+
+    function triggerScreenShake(durationMs, intensityPx) {
+      shakeTime = durationMs;
+      shakeDuration = durationMs;
+      shakeIntensity = intensityPx;
+    }
+
+    function triggerLineClearEffects(clearedRows) {
+      if (!clearedRows || !clearedRows.length) return;
+
+      // Sound
+      try {
+        lineClearSound.currentTime = 0;
+        lineClearSound.play();
+      } catch (e) {}
+
+      // Slight shake – stronger for more lines
+      const strength = 4 + clearedRows.length * 2;
+      triggerScreenShake(180, strength);
+
+      // For each cleared row, add a flash + particles
+      for (const gy of clearedRows) {
+        // Only flash visible part (skip hidden buffer rows)
+        if (gy >= HIDDEN_ROWS) {
+          const visibleRow = gy - HIDDEN_ROWS;
+          lineFlashRows.push({ row: visibleRow, time: 220, maxTime: 220 });
+
+          const baseY = FIELD_Y + visibleRow * BRICK_H;
+          const baseX = FIELD_X;
+
+          // Particle "sparkles" across the cleared row
+          for (let i = 0; i < COLS * 2; i++) {
+            const px = baseX + Math.random() * FIELD_W;
+            const py = baseY + (Math.random() - 0.5) * BRICK_H * 0.8;
+            const speed = 0.08 + Math.random() * 0.22;
+            const angle = (Math.random() - 0.5) * Math.PI * 0.9; // mostly sideways
+            particles.push({
+              x: px,
+              y: py,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed - 0.08,
+              life: 0,
+              maxLife: 320 + Math.random() * 200,
+            });
+          }
+        }
+      }
     }
 
     function getDropMs(level) {
@@ -369,6 +430,16 @@
     function drawFrame() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      // Screen shake (applies to everything drawn after this)
+      ctx.save();
+      if (shakeTime > 0 && shakeDuration > 0) {
+        const progress = shakeTime / shakeDuration;
+        const magnitude = shakeIntensity * progress;
+        const dx = (Math.random() - 0.5) * magnitude;
+        const dy = (Math.random() - 0.5) * magnitude;
+        ctx.translate(dx, dy);
+      }
+
       // Outer vignette
       const v = ctx.createRadialGradient(canvas.width * 0.35, canvas.height * 0.25, 10, canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height));
       v.addColorStop(0, "rgba(255,255,255,0.05)");
@@ -400,6 +471,8 @@
         ctx.drawImage(logoImg, x, y, w, h);
         ctx.restore();
       }
+
+      // Keep shake transform for the rest of the scene
     }
 
     function drawGrid(grid) {
@@ -425,6 +498,19 @@
           drawBrick(px, py, brickIndex, 1);
         }
       }
+
+      // Line flash overlay (glow) – per visible row
+      for (const f of lineFlashRows) {
+        const t = Math.max(0, Math.min(1, f.time / f.maxTime));
+        const alpha = t * 0.75;
+        const y = FIELD_Y + f.row * BRICK_H;
+        const grad = ctx.createLinearGradient(FIELD_X, y, FIELD_X + FIELD_W, y + BRICK_H);
+        grad.addColorStop(0, `rgba(255,255,255,${alpha * 0.2})`);
+        grad.addColorStop(0.5, `rgba(255,255,255,${alpha})`);
+        grad.addColorStop(1, `rgba(255,255,255,${alpha * 0.2})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(FIELD_X - 2, y - 1, FIELD_W + 4, BRICK_H + 2);
+      }
     }
 
     function drawPiece(piece, alpha = 1) {
@@ -449,7 +535,7 @@
       return dy;
     }
 
-    // Game loop state
+    // Game loop + effects state
     let grid = createGrid();
     let current = null;
     let next = null;
@@ -461,6 +547,9 @@
     let score = 0;
     let lines = 0;
     let level = 1;
+
+    // Game over cinematic
+    let gameOverAnim = null; // { elapsed, duration }
 
     function updateHUD() {
       scoreEl.textContent = score;
@@ -488,9 +577,15 @@
       updateHUD();
       setStatus("Playing...");
 
+      // Reset effects
+      lineFlashRows.length = 0;
+      particles.length = 0;
+      shakeTime = 0;
+      gameOverAnim = null;
+
       // Immediate game-over check
       if (collides(grid, current, 0, 0)) {
-        gameOver();
+        startGameOverCinematic();
         return;
       }
       requestAnimationFrame(tick);
@@ -499,30 +594,31 @@
     function gameOver() {
       running = false;
       paused = false;
-      setStatus("Game Over – Start to retry");
+      setStatus("Konec – stiskni Start");
       if (score > best) {
         best = score;
         localStorage.setItem("bricktris_best", String(best));
       }
       updateHUD();
-      // Dim overlay
-      ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
-      drawRoundedRect(FIELD_X - 10, FIELD_Y - 10, FIELD_W + 20, FIELD_H + 20, 14);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.font = "700 18px system-ui, -apple-system, Segoe UI, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("Game Over", FIELD_X + FIELD_W / 2, FIELD_Y + FIELD_H / 2 - 6);
-      ctx.font = "500 12px system-ui, -apple-system, Segoe UI, sans-serif";
-      ctx.fillStyle = "rgba(255,255,255,0.7)";
-      ctx.fillText("Press Start to build again", FIELD_X + FIELD_W / 2, FIELD_Y + FIELD_H / 2 + 16);
-      ctx.restore();
+    }
+
+    function startGameOverCinematic() {
+      // Already finalized best/score inside lockPiece, only play audio + animation here
+      running = false;
+      paused = false;
+      gameOverAnim = { elapsed: 0, duration: 1600 };
+      triggerScreenShake(260, 12);
+      try {
+        gameOverSound.currentTime = 0;
+        gameOverSound.play();
+      } catch (e) {}
+      requestAnimationFrame(tick);
     }
 
     function lockPiece() {
       merge(grid, current);
-      const cleared = clearLines(grid);
+      const clearedRows = clearLines(grid);
+      const cleared = clearedRows.length;
       if (cleared > 0) {
         // Classic-ish scoring
         const base = [0, 100, 300, 500, 800][cleared] || (cleared * 250);
@@ -538,6 +634,7 @@
           localStorage.setItem("bricktris_best", String(best));
         }
         updateHUD();
+        triggerLineClearEffects(clearedRows);
       }
 
       current = next;
@@ -548,8 +645,9 @@
       current.y = 0;
 
       if (collides(grid, current, 0, 0)) {
-        draw(); // render final
+        draw(); // render final state
         gameOver();
+        startGameOverCinematic();
       }
     }
 
@@ -584,15 +682,18 @@
       drawFrame();
       drawGrid(grid);
 
-      // Ghost piece
+      // Ghost piece (slightly transparent preview of landing position)
       if (running) {
         const dy = ghostDropY(grid, current);
         const ghost = { ...current, y: current.y + dy };
         drawPiece(ghost, 0.20);
       }
 
-      // Current piece
-      if (running) drawPiece(current, 1);
+      // Current piece (slightly "slow motion" when in game-over cinematic)
+      if (running || gameOverAnim) {
+        const alpha = gameOverAnim ? 0.7 : 1;
+        drawPiece(current, alpha);
+      }
 
       // Field edge accents
       ctx.save();
@@ -602,19 +703,91 @@
       drawRoundedRect(FIELD_X - 10, FIELD_Y - 10, FIELD_W + 20, FIELD_H + 20, 14);
       ctx.stroke();
       ctx.restore();
+
+      // Particles
+      ctx.save();
+      for (const p of particles) {
+        const lifeT = Math.max(0, Math.min(1, p.life / p.maxLife));
+        const size = 4 + (1 - lifeT) * 4;
+        const alpha = (1 - lifeT) * 0.9;
+        ctx.fillStyle = `rgba(255, 245, 200, ${alpha})`;
+        ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+      }
+      ctx.restore();
+
+      // Game over cinematic overlay
+      if (gameOverAnim) {
+        const t = Math.max(0, Math.min(1, gameOverAnim.elapsed / gameOverAnim.duration));
+        // Ease-in for fade
+        const fade = t * t;
+        ctx.save();
+        ctx.fillStyle = `rgba(40, 0, 0, ${0.4 + fade * 0.5})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = `rgba(255,255,255,${0.9})`;
+        ctx.textAlign = "center";
+        ctx.font = "900 32px system-ui, -apple-system, Segoe UI, sans-serif";
+        const cy = FIELD_Y + FIELD_H / 2;
+        ctx.fillText("KONEC, zkus to znovu!", FIELD_X + FIELD_W / 2, cy);
+        ctx.restore();
+      }
+
+      // Undo global screen-shake transform applied in drawFrame
+      ctx.restore();
     }
 
     function tick(t) {
+      if (!lastTime) lastTime = t;
+      const dt = t - lastTime;
+      lastTime = t;
+
+      // Update timers
+      if (shakeTime > 0) {
+        shakeTime = Math.max(0, shakeTime - dt);
+      }
+
+      // Update line flashes
+      for (let i = lineFlashRows.length - 1; i >= 0; i--) {
+        lineFlashRows[i].time -= dt;
+        if (lineFlashRows[i].time <= 0) {
+          lineFlashRows.splice(i, 1);
+        }
+      }
+
+      // Update particles
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life += dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        // simple gravity
+        p.vy += 0.0006 * dt;
+        if (p.life >= p.maxLife) {
+          particles.splice(i, 1);
+        }
+      }
+
+      // Game-over cinematic (runs even when not "running")
+      if (gameOverAnim) {
+        gameOverAnim.elapsed += dt;
+        draw();
+        if (gameOverAnim.elapsed >= gameOverAnim.duration) {
+          gameOverAnim = null;
+          gameOver();
+        } else {
+          requestAnimationFrame(tick);
+        }
+        return;
+      }
+
       if (!running) return;
+
       if (paused) {
         draw();
         requestAnimationFrame(tick);
         return;
       }
 
-      if (!lastTime) lastTime = t;
-      const dt = t - lastTime;
-      lastTime = t;
       dropAccum += dt;
 
       if (dropAccum >= dropMs) {
