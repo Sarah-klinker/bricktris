@@ -6,12 +6,13 @@
   <title>Bricktris Embed</title>
 </head>
 <body>
-  <canvas id="bricktris-embed" width="520" height="420" aria-label="Bricktris game"></canvas>
+  <canvas id="bricktris-embed" width="520" height="420" aria-label="Bricktris game" tabindex="0"></canvas>
 
   <script>
     (function () {
       const canvas = document.getElementById("bricktris-embed");
       const ctx = canvas.getContext("2d");
+      canvas.style.outline = "none";
 
       // Hosted assets for website embedding
       const ASSET_BASE_URL = "https://raw.githubusercontent.com/Sarah-klinker/bricktris/main/assets";
@@ -468,8 +469,11 @@
         requestAnimationFrame(tick);
       }
 
-      window.addEventListener("keydown", (e) => {
+      function onKeyDown(e) {
         const k = e.key;
+        if (["ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", " "].includes(k)) {
+          e.preventDefault();
+        }
         if (k === "r" || k === "R") {
           resetGame();
           return;
@@ -491,10 +495,20 @@
         } else if (k === "ArrowUp") {
           tryRotate();
         } else if (k === " ") {
-          e.preventDefault();
           hardDrop();
         }
+      }
+
+      canvas.addEventListener("pointerdown", () => {
+        canvas.focus();
       });
+
+      canvas.addEventListener("keydown", onKeyDown);
+
+      // Try to focus immediately; click/tap always focuses reliably.
+      setTimeout(() => {
+        canvas.focus();
+      }, 0);
 
       draw();
       requestAnimationFrame(tick);
