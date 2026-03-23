@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bricktris Embed</title>
+</head>
+<body>
+  <canvas id="bricktris-embed" width="520" height="420" aria-label="Bricktris game"></canvas>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById("bricktris-embed");
+      const ctx = canvas.getContext("2d");
+
+      // Hosted assets for website embedding
+      const ASSET_BASE_URL = "https://raw.githubusercontent.com/Sarah-klinker/bricktris/main/assets";
+
+      // Brick ratio 3:1
+      const BRICK_H = 16;
+      const BRICK_W = 48;
+      const COLS = 10;
+      const ROWS = 20;
+      const HIDDEN_ROWS = 2;
+      const GRID_ROWS = ROWS + HIDDEN_ROWS;
+
+      const FIELD_W = COLS * BRICK_W;
+      const FIELD_H = ROWS * BRICK_H;
+      const FIELD_X = Math.floor((canvas.width - FIELD_W) / 2);
+      const FIELD_Y = Math.floor((canvas.height - FIELD_H) / 2);
+
+      const logoImg = new Image();
+      logoImg.src = `${ASSET_BASE_URL}/klinker_logo_white.png`;
+      let logoReady = false;
+      logoImg.onload = () => { logoReady = true; };
+
+      const BRICK_IMAGES = [];
+      const BRICK_IMAGE_COUNT = 4;
+      let bricksReady = 0;
+      for (let i = 1; i <= BRICK_IMAGE_COUNT; i++) {
+        const img = new Image();
+        img.src = `${ASSET_BASE_URL}/formback_${i}.png`;
+        img.onload = () => { bricksReady++; };
+        BRICK_IMAGES.push(img);
+      }
+
+      const lineClearSound = new Audio(`${ASSET_BASE_URL}/line_clear.wav`);
+      lineClearSound.volume = 0.7;
+      const gameOverSound = new Audio(`${ASSET_BASE_URL}/game_over.wav`);
+      gameOverSound.volume = 0.8;
+
+      const PIECES = [
+        { m: [[1,1,1,1]] },
+        { m: [[1,1],[1,1]] },
+        { m: [[0,1,0],[1,1,1]] },
+        { m: [[0,1,1],[1,1,0]] },
+        { m: [[1,1,0],[0,1,1]] },
+        { m: [[1,0,0],[1,1,1]] },
+        { m: [[0,0,1],[1,1,1]] }
+      ];
+
+      function createGrid() {
+        return Array.from({ length: GRID_ROWS }, () => Array(COLS).fill(null));
+      }
+
+      function cloneMatrix(m) {
+        return m.map((row) => row.slice());
+      }
+
+      function rotateMatrixCW(m) {
+        const h = m.length;
+        const w = m[0].length;
+        const out = Array.from({ length: w }, () => Array(h).fill(0));
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            out[x][h - 1 - y] = m[y][x];
+          }
+        }
+        return out;
+      }
+
+      function randPiece() {
+        const p = PIECES[Math.floor(Math.random() * PIECES.length)];
+        const brickIndex = Math.floor(Math.random() * BRICK_IMAGE_COUNT);
+        return {
+          m: cloneMatrix(p.m),
+          x: Math.floor((COLS - p.m[0].length) / 2),
+          y: 0,
+          brickIndex
+        };
+      }
+
+      function collides(grid, piece, dx = 0, dy = 0, testM = null) {
+        const m = testM || piece.m;
+        for (let y = 0; y < m.length; y++) {
+          for (let x = 0; x < m[y].length; x++) {
+            if (!m[y][x]) continue;
+            const gx = piece.x + x + dx;
+            const gy = piece.y + y + dy;
+            if (gx < 0 || gx >= COLS || gy >= GRID_ROWS) return true;
+            if (gy >= 0 && grid[gy][gx] !== null && grid[gy][gx] !== undefined) return true;
+          }
+        }
+        return false;
+      }
+
+      function merge(grid, piece) {
+        for (let y = 0; y < piece.m.length; y++) {
+          for (let x = 0; x < piece.m[y].length; x++) {
+            if (!piece.m[y][x]) continue;
+            const gx = piece.x + x;
+            const gy = piece.y + y;
+            if (gy >= 0 && gy < GRID_ROWS) {
+              grid[gy][gx] = (piece.brickIndex + gx + gy) % BRICK_IMAGE_COUNT;
+            }
+          }
+        }
+      }
+
+      function clearLines(grid) {
+        const rows = [];
+        for (let y = 0; y < GRID_ROWS; y++) {
+          if (grid[y].every((cell) => cell !== null && cell !== undefined)) {
+            grid.splice(y, 1);
+            grid.unshift(Array(COLS).fill(null));
+            rows.push(y);
+          }
+        }
+        return rows;
+      }
+
+      function getDropMs(level) {
+        return Math.max(80, 650 - (level - 1) * 55);
+      }
+
+      function drawRoundedRect(x, y, w, h, r) {
+        const rr = Math.min(r, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.arcTo(x + w, y, x + w, y + h, rr);
+        ctx.arcTo(x + w, y + h, x, y + h, rr);
+        ctx.arcTo(x, y + h, x, y, rr);
+        ctx.arcTo(x, y, x + w, y, rr);
+        ctx.closePath();
+      }
+
+      function drawBrick(px, py, brickIndex, alpha = 1) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        if (bricksReady === BRICK_IMAGE_COUNT && BRICK_IMAGES[brickIndex] && BRICK_IMAGES[brickIndex].complete) {
+          ctx.drawImage(BRICK_IMAGES[brickIndex], px, py, BRICK_W, BRICK_H);
+        } else {
+          ctx.fillStyle = "#8B7355";
+          ctx.fillRect(px, py, BRICK_W, BRICK_H);
+          ctx.strokeStyle = "rgba(0,0,0,0.3)";
+          ctx.strokeRect(px, py, BRICK_W, BRICK_H);
+        }
+        ctx.restore();
+      }
+
+      function ghostDropY(grid, piece) {
+        let dy = 0;
+        while (!collides(grid, piece, 0, dy + 1)) dy++;
+        return dy;
+      }
+
+      // Effects
+      const lineFlashRows = [];
+      const particles = [];
+      let shakeTime = 0;
+      let shakeDuration = 0;
+      let shakeIntensity = 0;
+      let gameOverAnim = null;
+
+      function triggerScreenShake(durationMs, intensityPx) {
+        shakeTime = durationMs;
+        shakeDuration = durationMs;
+        shakeIntensity = intensityPx;
+      }
+
+      function triggerLineClearEffects(clearedRows) {
+        if (!clearedRows.length) return;
+        try {
+          lineClearSound.currentTime = 0;
+          lineClearSound.play();
+        } catch (e) {}
+        triggerScreenShake(180, 4 + clearedRows.length * 2);
+        for (const gy of clearedRows) {
+          if (gy < HIDDEN_ROWS) continue;
+          const visibleRow = gy - HIDDEN_ROWS;
+          lineFlashRows.push({ row: visibleRow, time: 220, maxTime: 220 });
+          const baseY = FIELD_Y + visibleRow * BRICK_H;
+          const baseX = FIELD_X;
+          for (let i = 0; i < COLS * 2; i++) {
+            const px = baseX + Math.random() * FIELD_W;
+            const py = baseY + (Math.random() - 0.5) * BRICK_H * 0.8;
+            const speed = 0.08 + Math.random() * 0.22;
+            const angle = (Math.random() - 0.5) * Math.PI * 0.9;
+            particles.push({
+              x: px, y: py,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed - 0.08,
+              life: 0,
+              maxLife: 320 + Math.random() * 200
+            });
+          }
+        }
+      }
+
+      // State
+      let grid = createGrid();
+      let current = randPiece();
+      let next = randPiece();
+      let running = true;
+      let paused = false;
+      let lastTime = 0;
+      let dropAccum = 0;
+      let score = 0;
+      let lines = 0;
+      let level = 1;
+      let dropMs = getDropMs(level);
+
+      function lockPiece() {
+        merge(grid, current);
+        const clearedRows = clearLines(grid);
+        const cleared = clearedRows.length;
+        if (cleared > 0) {
+          const base = [0, 100, 300, 500, 800][cleared] || (cleared * 250);
+          score += base * level;
+          lines += cleared;
+          level = 1 + Math.floor(lines / 10);
+          dropMs = getDropMs(level);
+          triggerLineClearEffects(clearedRows);
+        }
+
+        current = next;
+        next = randPiece();
+        current.x = Math.floor((COLS - current.m[0].length) / 2);
+        current.y = 0;
+
+        if (collides(grid, current, 0, 0)) {
+          running = false;
+          gameOverAnim = { elapsed: 0, duration: 1600 };
+          triggerScreenShake(260, 12);
+          try {
+            gameOverSound.currentTime = 0;
+            gameOverSound.play();
+          } catch (e) {}
+        }
+      }
+
+      function hardDrop() {
+        if (!running || paused) return;
+        const dy = ghostDropY(grid, current);
+        current.y += dy;
+        score += Math.max(0, dy) * 2;
+        lockPiece();
+      }
+
+      function tryRotate() {
+        if (!running || paused) return;
+        const rotated = rotateMatrixCW(current.m);
+        for (const k of [0, -1, 1, -2, 2]) {
+          if (!collides(grid, current, k, 0, rotated)) {
+            current.m = rotated;
+            current.x += k;
+            return;
+          }
+        }
+      }
+
+      function resetGame() {
+        grid = createGrid();
+        current = randPiece();
+        next = randPiece();
+        running = true;
+        paused = false;
+        score = 0;
+        lines = 0;
+        level = 1;
+        dropMs = getDropMs(level);
+        dropAccum = 0;
+        lineFlashRows.length = 0;
+        particles.length = 0;
+        shakeTime = 0;
+        gameOverAnim = null;
+      }
+
+      function drawFrame() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        if (shakeTime > 0 && shakeDuration > 0) {
+          const progress = shakeTime / shakeDuration;
+          const magnitude = shakeIntensity * progress;
+          ctx.translate((Math.random() - 0.5) * magnitude, (Math.random() - 0.5) * magnitude);
+        }
+
+        const v = ctx.createRadialGradient(canvas.width * 0.35, canvas.height * 0.25, 10, canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height));
+        v.addColorStop(0, "rgba(255,255,255,0.05)");
+        v.addColorStop(1, "rgba(0,0,0,0.55)");
+        ctx.fillStyle = v;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        drawRoundedRect(FIELD_X - 10, FIELD_Y - 10, FIELD_W + 20, FIELD_H + 20, 14);
+        ctx.fill();
+
+        if (logoReady) {
+          ctx.save();
+          ctx.globalAlpha = 0.1;
+          ctx.filter = "grayscale(100%)";
+          const maxW = FIELD_W * 0.9;
+          const maxH = FIELD_H * 0.6;
+          const scale = Math.min(maxW / logoImg.width, maxH / logoImg.height);
+          const w = logoImg.width * scale;
+          const h = logoImg.height * scale;
+          ctx.drawImage(logoImg, FIELD_X + (FIELD_W - w) / 2, FIELD_Y + (FIELD_H - h) / 2, w, h);
+          ctx.restore();
+        }
+      }
+
+      function drawGrid() {
+        ctx.save();
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = "rgba(255,255,255,0.10)";
+        for (let x = 0; x <= COLS; x++) ctx.fillRect(FIELD_X + x * BRICK_W, FIELD_Y, 1, FIELD_H);
+        for (let y = 0; y <= ROWS; y++) ctx.fillRect(FIELD_X, FIELD_Y + y * BRICK_H, FIELD_W, 1);
+        ctx.restore();
+
+        for (let gy = HIDDEN_ROWS; gy < GRID_ROWS; gy++) {
+          for (let gx = 0; gx < COLS; gx++) {
+            const brickIndex = grid[gy][gx];
+            if (brickIndex === null || brickIndex === undefined) continue;
+            drawBrick(FIELD_X + gx * BRICK_W, FIELD_Y + (gy - HIDDEN_ROWS) * BRICK_H, brickIndex, 1);
+          }
+        }
+
+        for (const f of lineFlashRows) {
+          const t = Math.max(0, Math.min(1, f.time / f.maxTime));
+          const alpha = t * 0.75;
+          const y = FIELD_Y + f.row * BRICK_H;
+          const grad = ctx.createLinearGradient(FIELD_X, y, FIELD_X + FIELD_W, y + BRICK_H);
+          grad.addColorStop(0, `rgba(255,255,255,${alpha * 0.2})`);
+          grad.addColorStop(0.5, `rgba(255,255,255,${alpha})`);
+          grad.addColorStop(1, `rgba(255,255,255,${alpha * 0.2})`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(FIELD_X - 2, y - 1, FIELD_W + 4, BRICK_H + 2);
+        }
+      }
+
+      function drawPiece(piece, alpha = 1) {
+        for (let y = 0; y < piece.m.length; y++) {
+          for (let x = 0; x < piece.m[y].length; x++) {
+            if (!piece.m[y][x]) continue;
+            const gx = piece.x + x;
+            const gy = piece.y + y;
+            if (gy < HIDDEN_ROWS) continue;
+            const brickIndex = (piece.brickIndex + x + y) % BRICK_IMAGE_COUNT;
+            drawBrick(FIELD_X + gx * BRICK_W, FIELD_Y + (gy - HIDDEN_ROWS) * BRICK_H, brickIndex, alpha);
+          }
+        }
+      }
+
+      function drawHudText() {
+        ctx.save();
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.font = "700 14px system-ui, -apple-system, Segoe UI, sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(`Score: ${score}`, 14, 22);
+        ctx.fillText(`Lines: ${lines}`, 14, 42);
+        ctx.fillText(`Level: ${level}`, 14, 62);
+        ctx.font = "600 12px system-ui, -apple-system, Segoe UI, sans-serif";
+        ctx.fillText("Arrows = move/rotate | Space = drop | P = pause | R = restart", 14, canvas.height - 12);
+        ctx.restore();
+      }
+
+      function draw() {
+        drawFrame();
+        drawGrid();
+        if (running) {
+          const ghost = { ...current, y: current.y + ghostDropY(grid, current) };
+          drawPiece(ghost, 0.2);
+        }
+        if (running || gameOverAnim) {
+          drawPiece(current, gameOverAnim ? 0.7 : 1);
+        }
+
+        ctx.save();
+        for (const p of particles) {
+          const lifeT = Math.max(0, Math.min(1, p.life / p.maxLife));
+          const size = 4 + (1 - lifeT) * 4;
+          ctx.fillStyle = `rgba(255, 245, 200, ${(1 - lifeT) * 0.9})`;
+          ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+        }
+        ctx.restore();
+
+        if (paused && running) {
+          ctx.save();
+          ctx.fillStyle = "rgba(0,0,0,0.35)";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "#fff";
+          ctx.textAlign = "center";
+          ctx.font = "800 30px system-ui, -apple-system, Segoe UI, sans-serif";
+          ctx.fillText("PAUSED", canvas.width / 2, canvas.height / 2);
+          ctx.restore();
+        }
+
+        if (gameOverAnim) {
+          const t = Math.max(0, Math.min(1, gameOverAnim.elapsed / gameOverAnim.duration));
+          const fade = t * t;
+          ctx.save();
+          ctx.fillStyle = `rgba(40, 0, 0, ${0.4 + fade * 0.5})`;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "rgba(255,255,255,0.95)";
+          ctx.textAlign = "center";
+          ctx.font = "900 32px system-ui, -apple-system, Segoe UI, sans-serif";
+          ctx.fillText("KONEC, zkus to znovu!", canvas.width / 2, canvas.height / 2);
+          ctx.font = "700 15px system-ui, -apple-system, Segoe UI, sans-serif";
+          ctx.fillText("Press R to restart", canvas.width / 2, canvas.height / 2 + 30);
+          ctx.restore();
+        }
+
+        drawHudText();
+        ctx.restore();
+      }
+
+      function tick(t) {
+        if (!lastTime) lastTime = t;
+        const dt = t - lastTime;
+        lastTime = t;
+
+        if (shakeTime > 0) shakeTime = Math.max(0, shakeTime - dt);
+        for (let i = lineFlashRows.length - 1; i >= 0; i--) {
+          lineFlashRows[i].time -= dt;
+          if (lineFlashRows[i].time <= 0) lineFlashRows.splice(i, 1);
+        }
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.life += dt;
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vy += 0.0006 * dt;
+          if (p.life >= p.maxLife) particles.splice(i, 1);
+        }
+
+        if (gameOverAnim) {
+          gameOverAnim.elapsed += dt;
+          if (gameOverAnim.elapsed >= gameOverAnim.duration) gameOverAnim = null;
+          draw();
+          requestAnimationFrame(tick);
+          return;
+        }
+
+        if (!running || paused) {
+          draw();
+          requestAnimationFrame(tick);
+          return;
+        }
+
+        dropAccum += dt;
+        if (dropAccum >= dropMs) {
+          dropAccum = 0;
+          if (!collides(grid, current, 0, 1)) current.y += 1;
+          else lockPiece();
+        }
+
+        draw();
+        requestAnimationFrame(tick);
+      }
+
+      window.addEventListener("keydown", (e) => {
+        const k = e.key;
+        if (k === "r" || k === "R") {
+          resetGame();
+          return;
+        }
+        if (k === "p" || k === "P") {
+          if (running) paused = !paused;
+          return;
+        }
+        if (!running || paused) return;
+        if (k === "ArrowLeft") {
+          if (!collides(grid, current, -1, 0)) current.x -= 1;
+        } else if (k === "ArrowRight") {
+          if (!collides(grid, current, 1, 0)) current.x += 1;
+        } else if (k === "ArrowDown") {
+          if (!collides(grid, current, 0, 1)) {
+            current.y += 1;
+            score += 1;
+          }
+        } else if (k === "ArrowUp") {
+          tryRotate();
+        } else if (k === " ") {
+          e.preventDefault();
+          hardDrop();
+        }
+      });
+
+      draw();
+      requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>
